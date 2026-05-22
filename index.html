@@ -1629,13 +1629,18 @@
         const fetched = priceResults.get(pos.symbol);
         const price = fetched?.price ?? pos.cachedPrice;
         const isLive = fetched?.live === true;
+        const previousClose = fetched?.previousClose ?? null;
+        const change = fetched?.change ??
+          (previousClose != null ? price - previousClose : 0);
+        const changePercent = fetched?.changePercent ??
+          (previousClose != null ? ((price - previousClose) / previousClose) * 100 : 0);
         return {
           ...pos,
           price,
           priceLive: isLive,
           yahooSymbol: fetched?.ticker ?? yahooSymbol(pos),
-          change: fetched?.change ?? 0,
-          changePercent: fetched?.changePercent ?? 0,
+          change,
+          changePercent,
         };
       });
     }

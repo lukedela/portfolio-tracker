@@ -44,9 +44,13 @@ async function fetchChartMeta(symbol) {
 
 function buildQuoteFromMeta(meta, symbol) {
   const previousClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+  const change = meta.regularMarketChange ??
+    (previousClose != null
+      ? meta.regularMarketPrice - previousClose
+      : null);
   const changePercent =
     meta.regularMarketChangePercent ??
-    (previousClose
+    (previousClose != null
       ? ((meta.regularMarketPrice - previousClose) / previousClose) * 100
       : null);
 
@@ -54,7 +58,7 @@ function buildQuoteFromMeta(meta, symbol) {
     symbol: meta.symbol || symbol,
     price: meta.regularMarketPrice,
     changePercent,
-    change: meta.regularMarketChange ?? null,
+    change,
     volume: meta.regularMarketVolume ?? null,
     currency: meta.currency || "USD",
     previousClose,
