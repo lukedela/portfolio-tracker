@@ -898,6 +898,7 @@
   <div class="container">
     <div class="api-key-bar">
       <button type="button" id="refresh-prices" class="btn-primary">Refresh Prices</button>
+      <button type="button" id="logout-btn" class="btn-primary secondary" style="display: none;">Logout</button>
       <p class="api-key-hint">Live data via Yahoo Finance · local proxy at <code>http://localhost:3000</code></p>
     </div>
 
@@ -1050,6 +1051,34 @@
     const TRANSACTIONS_STORAGE_KEY = "portfolio_transactions";
     let FX = 1.3913;
     const FX_CACHED = 1.3913;
+
+    // Authentication
+    async function checkAuthStatus() {
+      try {
+        const res = await fetch("/api/auth-status");
+        const data = await res.json();
+        
+        const logoutBtn = document.getElementById("logout-btn");
+        if (data.passwordProtected) {
+          logoutBtn.style.display = "inline-block";
+          logoutBtn.addEventListener("click", logout);
+        }
+      } catch (err) {
+        console.error("Failed to check auth status:", err);
+      }
+    }
+
+    async function logout() {
+      try {
+        await fetch("/api/logout", { method: "POST" });
+        window.location.href = "/login.html";
+      } catch (err) {
+        console.error("Logout failed:", err);
+      }
+    }
+
+    // Check auth status on page load
+    checkAuthStatus();
 
     const SEED_POSITIONS = [
       { symbol: "GLD",  shares: 1,  cost: 491.45,  cachedPrice: 430.33,  currency: "USD", sector: "Commodities",   country: "US" },

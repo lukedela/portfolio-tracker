@@ -1,8 +1,10 @@
 const express = require("express");
 const path = require("path");
+const session = require("express-session");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || null;
 
 const YAHOO_HEADERS = {
   "User-Agent":
@@ -174,6 +176,96 @@ app.get("/api/fx", async (req, res) => {
     console.error("GET /api/fx", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Session middleware
+app.use(
+  session({
+    secret: "portfolio-dashboard-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: { 
+      secure: false,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  })
+);
+
+app.use(express.json());
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+  if (!DASHBOARD_PASSWORD) {
+    // No password set, skip auth for local development
+    return next();
+  }
+  if (req.session.authenticated) {
+    return next();
+  }
+  res.status(401).json({ error: "Unauthorized" });
+}
+
+// Login endpoint
+app.post("/api/login", (req, res) => {
+  if (!DASHBOARD_PASSWORD) {
+    return res.status(400).json({ error: "Password protection not configured" });
+  }
+  
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "Password required" });
+  }
+  
+  if (password === DASHBOARD_PASSWORD) {
+    req.session.authenticated = true;
+    return res.json({ success: true });
+  }
+  
+  res.status(401).json({ error: "Invalid password" });
+});
+
+// Logout endpoint
+app.post("/api/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ error: "Logout failed" });
+    }
+    res.json({ success: true });
+  });
+});
+
+// Check auth status
+app.get("/api/auth-status", (req, res) => {
+  res.json({ 
+    authenticated: req.session.authenticated || !DASHBOARD_PASSWORD,
+    passwordProtected: !!DASHBOARD_PASSWORD,
+  });
+});
+
+// Middleware to serve login page or protect dashboard
+app.use((req, res, next) => {
+  // Always allow API endpoints and login.html
+  if (req.path.startsWith("/api/") || req.path === "/login.html") {
+    return next();
+  }
+  
+  // If no password is set, allow all access (local development)
+  if (!DASHBOARD_PASSWORD) {
+    return next();
+  }
+  
+  // If authenticated, allow access
+  if (req.session.authenticated) {
+    return next();
+  }
+  
+  // For HTML requests, redirect to login
+  if (req.path === "/" || req.path.endsWith(".html")) {
+    return res.sendFile(path.join(__dirname, "login.html"));
+  }
+  
+  // For other requests, deny access
+  res.status(401).json({ error: "Unauthorized" });
 });
 
 app.use(express.static(path.join(__dirname)));
