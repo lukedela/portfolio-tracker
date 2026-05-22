@@ -946,7 +946,6 @@
                   <th class="num">Unit Price</th>
                   <th class="num">Cost Basis (CAD)</th>
                   <th class="num">Current Value (CAD)</th>
-                  <th class="num">Day Change</th>
                   <th class="num">Gain / Loss (CAD)</th>
                   <th class="num">Gain / Loss %</th>
                 </tr>
@@ -1656,9 +1655,6 @@
       const costCAD = toCAD(costBasis, pos.currency);
       const gainCAD = valueCAD - costCAD;
       const gainPct = costCAD !== 0 ? (gainCAD / costCAD) * 100 : 0;
-      const dayChange = pos.shares * (pos.change ?? 0);
-      const dayChangeCAD = toCAD(dayChange, pos.currency);
-      const dayChangePct = pos.changePercent != null ? pos.changePercent : 0;
       return {
         ...pos,
         marketValue,
@@ -1667,9 +1663,6 @@
         costCAD,
         gainCAD,
         gainPct,
-        dayChange,
-        dayChangeCAD,
-        dayChangePct,
       };
     }
 
@@ -1678,15 +1671,12 @@
         (acc, h) => {
           acc.valueCAD += h.valueCAD;
           acc.costCAD += h.costCAD;
-          acc.dayChangeCAD += h.dayChangeCAD;
           return acc;
         },
-        { valueCAD: 0, costCAD: 0, dayChangeCAD: 0 }
+        { valueCAD: 0, costCAD: 0 }
       );
       totals.gainCAD = totals.valueCAD - totals.costCAD;
       totals.gainPct = totals.costCAD !== 0 ? (totals.gainCAD / totals.costCAD) * 100 : 0;
-      const prevValueCAD = totals.valueCAD - totals.dayChangeCAD;
-      totals.dayChangePct = prevValueCAD !== 0 ? (totals.dayChangeCAD / prevValueCAD) * 100 : 0;
       return totals;
     }
 
@@ -1924,11 +1914,7 @@
           <div class="value">${fmtCAD(totals.valueCAD)}</div>
           <div class="sub">All positions in CAD</div>
         </div>
-        <div class="summary-card">
-          <div class="label">Today's Change</div>
-          <div class="value ${gainClass(totals.dayChangeCAD)}">${fmtCAD(totals.dayChangeCAD)}</div>
-          <div class="sub ${gainClass(totals.dayChangeCAD)}">${fmtPct(totals.dayChangePct)} today</div>
-        </div>
+        
         <div class="summary-card">
           <div class="label">Total Gain / Loss</div>
           <div class="value ${gainCls}">${fmtCAD(totals.gainCAD)}</div>
@@ -1967,10 +1953,6 @@
               </td>
               <td class="num">${fmtCAD(h.costCAD)}</td>
               <td class="num">${fmtCAD(h.valueCAD)}</td>
-              <td class="num ${gainClass(h.dayChangeCAD)}">
-                ${fmtCAD(h.dayChangeCAD)}
-                <div class="unit-price">${fmtPct(h.dayChangePct)}</div>
-              </td>
               <td class="num ${gc}">${fmtCAD(h.gainCAD)}</td>
               <td class="num ${gc}">${fmtPct(h.gainPct)}</td>
             </tr>
@@ -1985,7 +1967,6 @@
           <td class="num">—</td>
           <td class="num">${fmtCAD(totals.costCAD)}</td>
           <td class="num">${fmtCAD(totals.valueCAD)}</td>
-          <td class="num ${gainClass(totals.dayChangeCAD)}">${fmtCAD(totals.dayChangeCAD)}</td>
           <td class="num ${gainClass(totals.gainCAD)}">${fmtCAD(totals.gainCAD)}</td>
           <td class="num ${gainClass(totals.gainCAD)}">${fmtPct(totals.gainPct)}</td>
         </tr>
