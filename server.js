@@ -195,10 +195,19 @@ app.get("/api/financials", async (req, res) => {
       "balanceSheetHistory",
       "cashflowStatementHistory",
       "earningsTrend",
-    ].join(",");
+    ].join("%2C");
 
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
-    const data = await yahooGet(url);
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&corsDomain=finance.yahoo.com&formatted=false`;
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Origin": "https://finance.yahoo.com",
+      "Referer": "https://finance.yahoo.com/",
+    };
+    const rawRes = await fetch(url, { headers });
+    if (!rawRes.ok) throw new Error(`Yahoo Finance returned ${rawRes.status}`);
+    const data = await rawRes.json();
     const result = data?.quoteSummary?.result?.[0];
 
     if (!result) throw new Error(`No financial data for ${symbol}`);
