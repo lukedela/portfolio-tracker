@@ -187,6 +187,122 @@ app.get("/api/financials", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
     if (!symbol) return res.status(400).json({ error: "Missing symbol" });
 
+    const apiKey = process.env.FMP_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "FMP_API_KEY not configured" });
+
+    const base = "https://financialmodelingprep.com/api/v3";
+
+    const [profileRes, keyMetricsRes, ratiosRes, growthRes] = await Promise.allSettled([
+      fetch(`${base}/profile/${symbol}?apikey=${apiKey}`).then(r => r.json()),
+      fetch(`${base}/key-metrics-ttm/${symbol}?apikey=${apiKey}`).then(r => r.json()),
+      fetch(`${base}/ratios-ttm/${symbol}?apikey=${apiKey}`).then(r => r.json()),
+      fetch(`${base}/financial-growth/${symbol}?limit=1&apikey=${apiKey}`).then(r => r.json()),
+    ]);
+
+    const profile    = profileRes.status === "fulfilled"    ? (profileRes.value[0]    || {}) : {};
+    const keyMetrics = keyMetricsRes.status === "fulfilled" ? (keyMetricsRes.value[0]  || {}) : {};
+    const ratios     = ratiosRes.status === "fulfilled"     ? (ratiosRes.value[0]      || {}) : {};
+    const growth     = growthRes.status === "fulfilled"     ? (growthRes.value[0]      || {}) : {};
+
+    function n(v) { return v != null && isFinite(Number(v)) ? Number(v) : null; }
+
+    res.json({
+      symbol,
+      name: profile.companyName || symbol,
+      pricing: {
+        currentPrice:      n(profile.price),
+        targetMean:        n(profile.dcfDiff != null ? profile.dcf : null),
+        targetLow:         null,
+        targetHigh:        null,
+        recommendationKey: null,
+        numberOfAnalysts:  null,
+      },
+      valuation: {
+        fwdPE:     n(keyMetrics.peRatioTTM),
+        trailPE:   n(ratios.priceEarningsRatioTTM),
+        pbRatio:   n(keyMetrics.pbRatioTTM),
+        psRatio:   n(keyMetrics.priceToSalesRatioTTM),
+        evEbitda:  n(keyMetrics.enterpriseValueOverEBITDATTM),
+        evRevenue: n(keyMetrics.evToSalesRatioTTM ?? keyMetrics.evToRevenueRatioTTM),
+      },
+      income: {
+        revenue:         n(keyMetrics.revenuePerShareTTM != null && profile.sharesOutstanding ? keyMetrics.revenuePerShareTTM * profile.sharesOutstanding : null),
+        netIncome:       null,
+        grossProfit:     null,
+        ebitda:          null,
+        profitMargin:    n(ratios.netProfitMarginTTM),
+        grossMargin:     n(ratios.grossProfitMarginTTM),
+        operatingMargin: n(ratios.operatingProfitMarginTTM),
+      },
+      growth: {
+        revenueGrowth:   n(growth.revenueGrowth),
+        earningsGrowth:  n(growth.netIncomeGrowth),
+        epsNextYear:     null,
+        revenueNextYear: null,
+      },
+      cashflow: {
+        freeCashFlow: n(keyMetrics.freeCashFlowPerShareTTM != null && profile.sharesOutstanding ? keyMetrics.freeCashFlowPerShareTTM * profile.sharesOutstanding : null),
+        operatingCF:  null,
+      },
+      balanceSheet: {
+        totalAssets:  null,
+        totalDebt:    null,
+        equity:       null,
+        cash:         null,
+        debtToEquity: n(ratios.debtEquityRatioTTM),
+        currentRatio: n(ratios.currentRatioTTM),
+        quickRatio:   n(ratios.quickRatioTTM),
+      },
+      returns: {
+        roe: n(ratios.returnOnEquityTTM),
+        roa: n(ratios.returnOnAssetsTTM),
+      },
+      dividends: {
+        divYield:    n(profile.lastDiv != null && profile.price ? profile.lastDiv / profile.price : null),
+        payoutRatio: n(ratios.dividendPayoutRatioTTM),
+      },
+      risk: {
+        beta:       n(profile.beta),
+        shortRatio: null,
+      },
+      ownership: {
+        floatShares:        null,
+        sharesOutstanding:  n(profile.sharesOutstanding),
+        insiderPercent:     null,
+        institutionPercent: null,
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/financials", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.get("/api/fx", async (req, res) => {
+  try {
+    const url =
+      "https://query1.finance.yahoo.com/v8/finance/chart/CAD=X?interval=1d&range=1d";
+    const data = await yahooGet(url);
+    const meta = data?.chart?.result?.[0]?.meta;
+    const rate = meta?.regularMarketPrice;
+
+    if (!rate) {
+      return res.status(404).json({ error: "USD/CAD rate unavailable" });
+    }
+
+    res.json({ from: "USD", to: "CAD", rate });
+  } catch (err) {
+    console.error("GET /api/fx", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/financials", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+    if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+
     // Use the v8 chart endpoint (same one that works for quotes) with extended range for more meta
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1y&includePrePost=false`;
     const data = await yahooGet(url);
