@@ -2727,9 +2727,8 @@
       document.getElementById("res-name").textContent = "Loading…";
       document.getElementById("res-price").textContent = "—";
       document.getElementById("res-change").textContent = "";
-      document.getElementById("res-thesis-content").innerHTML = "";
 
-      // Switch to thesis tab
+      // Switch to valuation tab
       document.querySelectorAll(".research-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.rtab === "valuation"));
       document.querySelectorAll(".research-panel").forEach(p => p.classList.toggle("active", p.id === "rpanel-valuation"));
 
