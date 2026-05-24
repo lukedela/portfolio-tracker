@@ -12,6 +12,25 @@ const YAHOO_HEADERS = {
   Accept: "application/json",
 };
 
+
+// ── In-memory cache for financial data (24hr TTL) ──
+const finCache = new Map();
+const FIN_CACHE_TTL = 24 * 60 * 60 * 1000;
+
+function getCached(symbol) {
+  const entry = finCache.get(symbol);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > FIN_CACHE_TTL) {
+    finCache.delete(symbol);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCache(symbol, data) {
+  finCache.set(symbol, { data, timestamp: Date.now() });
+}
+
 async function yahooGet(url) {
   const res = await fetch(url, { headers: YAHOO_HEADERS });
   if (!res.ok) {
@@ -187,6 +206,12 @@ app.get("/api/financials", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
     if (!symbol) return res.status(400).json({ error: "Missing symbol" });
 
+    const cached = getCached(symbol);
+    if (cached) {
+      console.log(`GET /api/financials ${symbol} (cached)`);
+      return res.json(cached);
+    }
+
     const apiKey = process.env.ALPHA_VANTAGE_KEY;
     if (!apiKey) return res.status(500).json({ error: "ALPHA_VANTAGE_KEY not configured" });
 
@@ -276,7 +301,10 @@ app.get("/api/financials", async (req, res) => {
         insiderPercent:     null,
         institutionPercent: null,
       },
-    });
+    };
+    setCache(symbol, result);
+    console.log(`GET /api/financials ${symbol} (fresh)`);
+    res.json(result);
   } catch (err) {
     console.error("GET /api/financials", err.message);
     res.status(500).json({ error: err.message });
