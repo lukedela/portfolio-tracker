@@ -187,6 +187,127 @@ app.get("/api/financials", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
     if (!symbol) return res.status(400).json({ error: "Missing symbol" });
 
+    const apiKey = process.env.ALPHA_VANTAGE_KEY;
+    if (!apiKey) return res.status(500).json({ error: "ALPHA_VANTAGE_KEY not configured" });
+
+    const base = "https://www.alphavantage.co/query";
+
+    // Fetch overview (has all fundamentals) and global quote in parallel
+    const [overviewRes, quoteRes] = await Promise.allSettled([
+      fetch(`${base}?function=OVERVIEW&symbol=${symbol}&apikey=${apiKey}`).then(r => r.json()),
+      fetch(`${base}?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`).then(r => r.json()),
+    ]);
+
+    const ov = overviewRes.status === "fulfilled" ? overviewRes.value : {};
+    const qt = quoteRes.status === "fulfilled" ? (quoteRes.value["Global Quote"] || {}) : {};
+
+    if (!ov.Symbol && !qt["01. symbol"]) {
+      throw new Error("No data returned — symbol may be invalid or rate limited");
+    }
+
+    function n(v) {
+      if (v == null || v === "None" || v === "-" || v === "") return null;
+      const num = Number(v);
+      return isFinite(num) ? num : null;
+    }
+
+    res.json({
+      symbol: ov.Symbol || symbol,
+      name: ov.Name || symbol,
+      pricing: {
+        currentPrice:      n(qt["05. price"]),
+        targetMean:        n(ov.AnalystTargetPrice),
+        targetLow:         null,
+        targetHigh:        null,
+        recommendationKey: null,
+        numberOfAnalysts:  n(ov.AnalystRatingBuy) != null ? (n(ov.AnalystRatingBuy) + n(ov.AnalystRatingHold) + n(ov.AnalystRatingSell)) : null,
+      },
+      valuation: {
+        fwdPE:     n(ov.ForwardPE),
+        trailPE:   n(ov.TrailingPE),
+        pbRatio:   n(ov.PriceToBookRatio),
+        psRatio:   n(ov.PriceToSalesRatioTTM),
+        evEbitda:  n(ov.EVToEBITDA),
+        evRevenue: n(ov.EVToRevenue),
+      },
+      income: {
+        revenue:         n(ov.RevenueTTM),
+        netIncome:       n(ov.NetIncomeTTM) ?? n(ov.NetIncomeLastFiscalYear),
+        grossProfit:     n(ov.GrossProfitTTM),
+        ebitda:          n(ov.EBITDA),
+        profitMargin:    n(ov.ProfitMargin),
+        grossMargin:     n(ov.GrossProfitTTM) != null && n(ov.RevenueTTM) ? n(ov.GrossProfitTTM) / n(ov.RevenueTTM) : null,
+        operatingMargin: n(ov.OperatingMarginTTM),
+      },
+      growth: {
+        revenueGrowth:   n(ov.RevenuePerShareTTM),
+        earningsGrowth:  null,
+        epsNextYear:     n(ov.EPSEstimatedNextYear ?? ov.ForwardEPS),
+        revenueNextYear: null,
+      },
+      cashflow: {
+        freeCashFlow: n(ov.OperatingCashflowTTM),
+        operatingCF:  n(ov.OperatingCashflowTTM),
+      },
+      balanceSheet: {
+        totalAssets:  null,
+        totalDebt:    null,
+        equity:       n(ov.BookValue) != null && n(ov.SharesOutstanding) ? n(ov.BookValue) * n(ov.SharesOutstanding) : null,
+        cash:         n(ov.CashAndCashEquivalentsAtCarryingValue),
+        debtToEquity: n(ov.DebtToEquityRatio ?? ov.DtoEQ),
+        currentRatio: n(ov.CurrentRatio),
+        quickRatio:   null,
+      },
+      returns: {
+        roe: n(ov.ReturnOnEquityTTM),
+        roa: n(ov.ReturnOnAssetsTTM),
+      },
+      dividends: {
+        divYield:    n(ov.DividendYield),
+        payoutRatio: n(ov.PayoutRatio),
+      },
+      risk: {
+        beta:       n(ov.Beta),
+        shortRatio: null,
+      },
+      ownership: {
+        floatShares:        null,
+        sharesOutstanding:  n(ov.SharesOutstanding),
+        insiderPercent:     null,
+        institutionPercent: null,
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/financials", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.get("/api/fx", async (req, res) => {
+  try {
+    const url =
+      "https://query1.finance.yahoo.com/v8/finance/chart/CAD=X?interval=1d&range=1d";
+    const data = await yahooGet(url);
+    const meta = data?.chart?.result?.[0]?.meta;
+    const rate = meta?.regularMarketPrice;
+
+    if (!rate) {
+      return res.status(404).json({ error: "USD/CAD rate unavailable" });
+    }
+
+    res.json({ from: "USD", to: "CAD", rate });
+  } catch (err) {
+    console.error("GET /api/fx", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/financials", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+    if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+
     const apiKey = process.env.FMP_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "FMP_API_KEY not configured" });
 
