@@ -1352,9 +1352,69 @@
     @keyframes blink {
       50% { opacity: 0; }
     }
+
+    /* ── Tooltips ── */
+    .ratio-table tr {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .ratio-table tr:hover td:first-child {
+      color: var(--accent);
+    }
+
+    .metric-tooltip {
+      position: fixed;
+      z-index: 999;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      padding: 0.9rem 1rem;
+      max-width: 280px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.15s, transform 0.15s;
+    }
+
+    .metric-tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .metric-tooltip .tt-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+    }
+
+    .metric-tooltip .tt-def {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 0.5rem;
+    }
+
+    .metric-tooltip .tt-interp {
+      font-size: 0.82rem;
+      font-weight: 600;
+      line-height: 1.4;
+      padding: 0.4rem 0.6rem;
+      border-radius: 6px;
+    }
+
+    .tt-good  { background: var(--green-bg); color: var(--green); }
+    .tt-ok    { background: var(--amber-bg); color: var(--amber); }
+    .tt-bad   { background: var(--red-bg);   color: var(--red);   }
+    .tt-info  { background: var(--surface-2); color: var(--text-muted); }
   </style>
 </head>
 <body>
+  <div id="metric-tooltip" class="metric-tooltip"></div>
   <div class="container">
     <div class="api-key-bar">
       <button type="button" id="refresh-prices" class="btn-primary">Refresh Prices</button>
@@ -2663,6 +2723,7 @@
       renderTransactions();
       setupTabs();
       setupResearch();
+      setupTooltips();
 
       document.getElementById("refresh-prices").addEventListener("click", () => {
         loadLivePrices();
@@ -2798,7 +2859,142 @@
     }
 
     function ratioRow(label, value) {
-      return `<tr><td>${escHtml(label)}</td><td>${escHtml(String(value))}</td></tr>`;
+      return `<tr data-metric="${escHtml(label)}" data-value="${escHtml(String(value))}"><td>${escHtml(label)} <span style="color:var(--border);font-size:0.7rem;">ⓘ</span></td><td>${escHtml(String(value))}</td></tr>`;
+    }
+
+    // ── Metric definitions & interpreters ──
+    const METRIC_INFO = {
+      "Forward P/E": {
+        def: "Price relative to next year's expected earnings. Lower = cheaper relative to growth expectations.",
+        interp: (v) => v < 15 ? ["Cheap — trading at a low forward multiple", "tt-good"] : v < 25 ? ["Fair — reasonable for most quality companies", "tt-ok"] : v < 40 ? ["Expensive — priced for high growth", "tt-ok"] : ["Very expensive — market expects exceptional growth", "tt-bad"],
+      },
+      "Trailing P/E": {
+        def: "Price relative to actual earnings over the past 12 months.",
+        interp: (v) => v < 15 ? ["Cheap relative to historical earnings", "tt-good"] : v < 25 ? ["Fairly valued on trailing earnings", "tt-ok"] : v < 40 ? ["Premium valuation — needs earnings growth to justify", "tt-ok"] : ["Expensive on trailing basis", "tt-bad"],
+      },
+      "Price / Book": {
+        def: "Share price relative to net assets (assets minus liabilities). Book value is what the company is 'worth' on paper.",
+        interp: (v) => v < 1 ? ["Trading below book — possibly undervalued or distressed", "tt-good"] : v < 3 ? ["Reasonable price-to-book ratio", "tt-ok"] : v < 8 ? ["Premium to book — reflects intangible value or brand", "tt-ok"] : ["Very high P/B — relies heavily on intangibles/goodwill", "tt-bad"],
+      },
+      "Price / Sales": {
+        def: "Market cap divided by annual revenue. Useful for unprofitable or early-stage companies.",
+        interp: (v) => v < 2 ? ["Low P/S — value territory", "tt-good"] : v < 6 ? ["Moderate P/S — reasonable for profitable businesses", "tt-ok"] : v < 15 ? ["High P/S — priced for strong revenue growth", "tt-ok"] : ["Very high P/S — significant growth already priced in", "tt-bad"],
+      },
+      "EV / EBITDA": {
+        def: "Enterprise value divided by earnings before interest, tax, depreciation & amortisation. A cleaner valuation multiple than P/E.",
+        interp: (v) => v < 8 ? ["Cheap — potentially undervalued", "tt-good"] : v < 15 ? ["Fair — in line with market averages", "tt-ok"] : v < 25 ? ["Premium — market pricing in growth", "tt-ok"] : ["Expensive EV/EBITDA", "tt-bad"],
+      },
+      "EV / Revenue": {
+        def: "Enterprise value relative to total revenue. Similar to P/S but accounts for debt.",
+        interp: (v) => v < 2 ? ["Low — value territory", "tt-good"] : v < 6 ? ["Moderate — reasonable", "tt-ok"] : v < 15 ? ["High — priced for growth", "tt-ok"] : ["Very high — growth heavily priced in", "tt-bad"],
+      },
+      "Gross Margin": {
+        def: "Revenue minus cost of goods sold, as a % of revenue. Measures pricing power and production efficiency.",
+        interp: (v) => v > 0.6 ? ["Excellent — high pricing power (e.g. software, pharma)", "tt-good"] : v > 0.35 ? ["Good gross margin", "tt-ok"] : v > 0.15 ? ["Moderate — typical for industrial/retail", "tt-ok"] : ["Thin — low pricing power or high production costs", "tt-bad"],
+      },
+      "Operating Margin": {
+        def: "Profit after operating expenses (before interest & tax), as a % of revenue. Shows core business efficiency.",
+        interp: (v) => v > 0.25 ? ["Excellent operating efficiency", "tt-good"] : v > 0.1 ? ["Solid operating margin", "tt-ok"] : v > 0 ? ["Slim but positive — watch for compression", "tt-ok"] : ["Negative operating margin — burning cash", "tt-bad"],
+      },
+      "Profit Margin": {
+        def: "Net income as a % of revenue — the bottom line after all costs, interest, and taxes.",
+        interp: (v) => v > 0.2 ? ["Highly profitable", "tt-good"] : v > 0.08 ? ["Healthy profit margin", "tt-ok"] : v > 0 ? ["Slim margins — vulnerable to cost increases", "tt-ok"] : ["Loss-making on a net basis", "tt-bad"],
+      },
+      "ROE": {
+        def: "Return on equity — net income divided by shareholders' equity. Measures how efficiently the company uses investor capital.",
+        interp: (v) => v > 0.2 ? ["Excellent capital efficiency", "tt-good"] : v > 0.1 ? ["Good ROE — above most benchmarks", "tt-ok"] : v > 0 ? ["Positive but low ROE", "tt-ok"] : ["Negative ROE — losing money", "tt-bad"],
+      },
+      "ROA": {
+        def: "Return on assets — net income divided by total assets. Shows how well management uses the company's assets to generate profit.",
+        interp: (v) => v > 0.1 ? ["Strong asset utilisation", "tt-good"] : v > 0.05 ? ["Decent ROA", "tt-ok"] : v > 0 ? ["Low but positive ROA", "tt-ok"] : ["Negative — assets not generating profit", "tt-bad"],
+      },
+      "Debt / Equity": {
+        def: "Total debt relative to shareholders' equity. Higher = more leveraged and more financial risk.",
+        interp: (v) => v < 0.3 ? ["Low leverage — conservative balance sheet", "tt-good"] : v < 1 ? ["Moderate debt — manageable", "tt-ok"] : v < 2 ? ["Elevated leverage — monitor carefully", "tt-ok"] : ["High leverage — significant financial risk", "tt-bad"],
+      },
+      "Current Ratio": {
+        def: "Current assets divided by current liabilities. Measures ability to pay short-term obligations. Above 1 = can cover debts.",
+        interp: (v) => v > 2 ? ["Strong liquidity buffer", "tt-good"] : v > 1 ? ["Adequate — can cover short-term debts", "tt-ok"] : v > 0.7 ? ["Tight liquidity — watch closely", "tt-ok"] : ["Could struggle to meet short-term obligations", "tt-bad"],
+      },
+      "Beta": {
+        def: "Measures volatility relative to the market. Beta > 1 = more volatile than S&P 500. Beta < 1 = less volatile.",
+        interp: (v) => v < 0.5 ? ["Very low volatility — defensive stock", "tt-good"] : v < 1 ? ["Below-market volatility", "tt-ok"] : v < 1.5 ? ["Moderate volatility — moves with the market", "tt-ok"] : ["High volatility — larger swings than the market", "tt-bad"],
+      },
+      "Dividend Yield": {
+        def: "Annual dividend per share divided by share price. The income return from holding the stock.",
+        interp: (v) => v > 0.04 ? ["High yield — attractive income but check sustainability", "tt-ok"] : v > 0.015 ? ["Moderate dividend — steady income", "tt-good"] : v > 0 ? ["Low yield — growth-focused company", "tt-ok"] : ["No dividend — reinvesting all earnings", "tt-info"],
+      },
+      "Revenue": {
+        def: "Total income generated from the company's core business operations in the last 12 months.",
+        interp: (v) => ["Scale indicator — compare to peers in the same sector", "tt-info"],
+      },
+      "Net Income": {
+        def: "Profit after all expenses, interest, and taxes. The actual bottom-line earnings.",
+        interp: (v) => v > 0 ? ["Profitable — generating real earnings", "tt-good"] : ["Loss-making — burning through cash", "tt-bad"],
+      },
+      "EBITDA": {
+        def: "Earnings before interest, taxes, depreciation & amortisation. A rough proxy for operating cash flow.",
+        interp: (v) => v > 0 ? ["Positive EBITDA — operationally cash generative", "tt-good"] : ["Negative EBITDA — cash burn at the operating level", "tt-bad"],
+      },
+      "Free Cash Flow": {
+        def: "Cash generated after capital expenditure. The real cash available to return to shareholders or reinvest.",
+        interp: (v) => v > 0 ? ["Positive FCF — self-funding business", "tt-good"] : ["Negative FCF — requires external financing", "tt-bad"],
+      },
+      "Analyst Target": {
+        def: "The average 12-month price target from Wall Street analysts covering the stock.",
+        interp: (v) => ["Compare to current price to gauge consensus upside/downside", "tt-info"],
+      },
+    };
+
+    function setupTooltips() {
+      const tooltip = document.getElementById("metric-tooltip");
+      let currentRow = null;
+
+      document.addEventListener("mouseover", (e) => {
+        const row = e.target.closest(".ratio-table tr[data-metric]");
+        if (!row || row === currentRow) return;
+        currentRow = row;
+
+        const label = row.dataset.metric;
+        const rawVal = row.dataset.value;
+        const info = METRIC_INFO[label];
+
+        if (!info) { tooltip.classList.remove("visible"); return; }
+
+        const numVal = parseFloat(rawVal);
+        let interpHtml = "";
+        if (info.interp && !isNaN(numVal)) {
+          const [text, cls] = info.interp(numVal);
+          interpHtml = `<div class="tt-interp ${cls}">${escHtml(text)}</div>`;
+        }
+
+        tooltip.innerHTML = `
+          <div class="tt-label">${escHtml(label)}</div>
+          <div class="tt-def">${escHtml(info.def)}</div>
+          ${interpHtml}
+        `;
+        tooltip.classList.add("visible");
+        positionTooltip(e);
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (tooltip.classList.contains("visible")) positionTooltip(e);
+      });
+
+      document.addEventListener("mouseout", (e) => {
+        const row = e.target.closest(".ratio-table tr[data-metric]");
+        if (row) { currentRow = null; tooltip.classList.remove("visible"); }
+      });
+
+      function positionTooltip(e) {
+        const tw = 280, th = 140;
+        let x = e.clientX + 16;
+        let y = e.clientY + 16;
+        if (x + tw > window.innerWidth - 8) x = e.clientX - tw - 8;
+        if (y + th > window.innerHeight - 8) y = e.clientY - th - 8;
+        tooltip.style.left = x + "px";
+        tooltip.style.top  = y + "px";
+      }
     }
 
     function scoreGrade(score) {
