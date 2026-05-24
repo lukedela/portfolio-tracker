@@ -1487,23 +1487,13 @@
             </div>
 
             <div class="research-tabs">
-              <button class="research-tab-btn active" data-rtab="thesis">AI Thesis</button>
-              <button class="research-tab-btn" data-rtab="valuation">Valuation</button>
+              <button class="research-tab-btn active" data-rtab="valuation">Valuation</button>
               <button class="research-tab-btn" data-rtab="financials">Financials</button>
               <button class="research-tab-btn" data-rtab="analyst">Analyst View</button>
             </div>
 
-            <!-- AI Thesis -->
-            <div class="research-panel active" id="rpanel-thesis">
-              <div id="res-loading-thesis" class="research-loading" style="display:none;">
-                <div class="spinner"></div>
-                <span>Generating AI research report…</span>
-              </div>
-              <div id="res-thesis-content" class="ai-report"></div>
-            </div>
-
             <!-- Valuation -->
-            <div class="research-panel" id="rpanel-valuation">
+            <div class="research-panel active" id="rpanel-valuation">
               <div class="score-ring-row" id="res-score-row"></div>
               <div class="ratio-section-title">Valuation Multiples</div>
               <table class="ratio-table" id="res-val-table"></table>
@@ -2740,10 +2730,9 @@
       document.getElementById("res-thesis-content").innerHTML = "";
 
       // Switch to thesis tab
-      document.querySelectorAll(".research-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.rtab === "thesis"));
-      document.querySelectorAll(".research-panel").forEach(p => p.classList.toggle("active", p.id === "rpanel-thesis"));
+      document.querySelectorAll(".research-tab-btn").forEach(b => b.classList.toggle("active", b.dataset.rtab === "valuation"));
+      document.querySelectorAll(".research-panel").forEach(p => p.classList.toggle("active", p.id === "rpanel-valuation"));
 
-      document.getElementById("res-loading-thesis").style.display = "flex";
 
       try {
         // Fetch quote + financials in parallel
@@ -2781,12 +2770,8 @@
         renderAnalystPanel(fin);
 
         // AI thesis via Claude API
-        await streamAIThesis(symbol, quote, fin);
-
       } catch (err) {
-        document.getElementById("res-loading-thesis").style.display = "none";
-        document.getElementById("res-thesis-content").innerHTML =
-          `<p style="color:var(--red)">Error: ${escHtml(err.message)}</p>`;
+        console.error(err);
       }
     }
 
@@ -2987,163 +2972,6 @@
         ratioRow("High Target",  fmt$(targetHigh)),
         ratioRow("# Analysts",   numberOfAnalysts ?? "—"),
       ].join("");
-    }
-
-    async function streamAIThesis(symbol, quote, fin) {
-      const loadingEl = document.getElementById("res-loading-thesis");
-      const contentEl = document.getElementById("res-thesis-content");
-
-      loadingEl.style.display = "flex";
-      contentEl.innerHTML = "";
-
-      // Build context for Claude
-      const ctx = [];
-      if (quote)  ctx.push(`Current Price: ${quote.price} ${quote.currency || "USD"}, Day Change: ${quote.changePercent != null ? quote.changePercent.toFixed(2) + "%" : "N/A"}`);
-      if (fin?.valuation) {
-        const v = fin.valuation;
-        ctx.push(`Valuation: Forward P/E=${fmtMultiple(v.fwdPE)}, Trailing P/E=${fmtMultiple(v.trailPE)}, P/B=${fmtMultiple(v.pbRatio)}, P/S=${fmtMultiple(v.psRatio)}, EV/EBITDA=${fmtMultiple(v.evEbitda)}`);
-      }
-      if (fin?.income) {
-        const i = fin.income;
-        ctx.push(`Financials: Revenue=${fmtBig(i.revenue)}, Net Income=${fmtBig(i.netIncome)}, Gross Margin=${fmtPctRaw(i.grossMargin)}, Operating Margin=${fmtPctRaw(i.operatingMargin)}, Profit Margin=${fmtPctRaw(i.profitMargin)}`);
-      }
-      if (fin?.growth)      ctx.push(`Growth: Revenue=${fmtPctRaw(fin.growth.revenueGrowth)}, Earnings=${fmtPctRaw(fin.growth.earningsGrowth)}`);
-      if (fin?.balanceSheet) {
-        const b = fin.balanceSheet;
-        ctx.push(`Balance Sheet: Debt/Equity=${fmtMultiple(b.debtToEquity,"")}, Current Ratio=${fmtMultiple(b.currentRatio)}, Cash=${fmtBig(b.cash)}`);
-      }
-      if (fin?.returns)     ctx.push(`Returns: ROE=${fmtPctRaw(fin.returns.roe)}, ROA=${fmtPctRaw(fin.returns.roa)}`);
-      if (fin?.pricing)     ctx.push(`Analyst Consensus: ${fin.pricing.recommendationKey || "N/A"}, Mean Target=${fmt$(fin.pricing.targetMean)}, Upside vs current`);
-      if (fin?.risk)        ctx.push(`Risk: Beta=${fmtMultiple(fin.risk.beta)}`);
-
-      const prompt = `You are a senior equity research analyst. Generate a concise but substantive research note for ${symbol}.
-
-Financial data:
-${ctx.join("\n")}
-
-Write your report in this EXACT format using these section headers:
-
-**INVESTMENT SUMMARY**
-2-3 sentence verdict. State clearly whether you'd lean bullish, bearish, or neutral and why.
-
-**BULL CASE**
-- [Point 1]
-- [Point 2]
-- [Point 3]
-
-**BEAR CASE**
-- [Point 1]
-- [Point 2]
-- [Point 3]
-
-**VALUATION ASSESSMENT**
-Comment on whether the stock looks cheap, fair, or expensive based on the multiples. Reference specific numbers.
-
-**KEY RISKS TO WATCH**
-2-3 specific risks an investor should monitor.
-
-**BOTTOM LINE**
-One punchy sentence verdict.
-
-Be specific, use the actual numbers provided, and write like a real analyst — direct and data-driven, not generic.`;
-
-      try {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            stream: true,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-
-        loadingEl.style.display = "none";
-        contentEl.innerHTML = '<div class="ai-streaming ai-cursor" id="ai-stream-div"></div>';
-        const streamDiv = document.getElementById("ai-stream-div");
-
-        let fullText = "";
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (data === "[DONE]") continue;
-            try {
-              const parsed = JSON.parse(data);
-              const delta = parsed?.delta?.text || parsed?.delta?.value || "";
-              if (delta) {
-                fullText += delta;
-                streamDiv.innerHTML = formatAIReport(fullText) + '<span class="ai-cursor-inline">▌</span>';
-              }
-            } catch { /* skip malformed chunks */ }
-          }
-        }
-
-        streamDiv.classList.remove("ai-cursor");
-        contentEl.innerHTML = formatAIReport(fullText);
-
-      } catch (err) {
-        loadingEl.style.display = "none";
-        contentEl.innerHTML = `<p style="color:var(--red)">AI report failed: ${escHtml(err.message)}. Make sure the Claude API is accessible.</p>`;
-      }
-    }
-
-    function formatAIReport(text) {
-      if (!text) return "";
-      // Parse the structured report into styled HTML
-      const lines = text.split("\n");
-      let html = "";
-      let inBull = false, inBear = false;
-      let bullItems = [], bearItems = [];
-
-      function flushThesis() {
-        if (bullItems.length || bearItems.length) {
-          html += '<div class="thesis-grid">';
-          if (bullItems.length) {
-            html += `<div class="thesis-card thesis-bull"><h4>🟢 Bull Case</h4><ul>${bullItems.map(i => `<li>${escHtml(i)}</li>`).join("")}</ul></div>`;
-          }
-          if (bearItems.length) {
-            html += `<div class="thesis-card thesis-bear"><h4>🔴 Bear Case</h4><ul>${bearItems.map(i => `<li>${escHtml(i)}</li>`).join("")}</ul></div>`;
-          }
-          html += '</div>';
-          bullItems = []; bearItems = []; inBull = false; inBear = false;
-        }
-      }
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        if (trimmed.startsWith("**") && trimmed.endsWith("**")) {
-          const header = trimmed.replace(/\*\*/g, "");
-          if (header === "BULL CASE") { inBull = true; inBear = false; continue; }
-          if (header === "BEAR CASE") { inBear = true; inBull = false; continue; }
-          flushThesis();
-          html += `<h3>${escHtml(header)}</h3>`;
-          continue;
-        }
-
-        if (trimmed.startsWith("- ") && (inBull || inBear)) {
-          const item = trimmed.slice(2);
-          if (inBull) bullItems.push(item);
-          else bearItems.push(item);
-          continue;
-        }
-
-        if (inBull || inBear) flushThesis();
-        if (trimmed) html += `<p>${escHtml(trimmed)}</p>`;
-      }
-
-      flushThesis();
-      return html;
     }
 
     init();
