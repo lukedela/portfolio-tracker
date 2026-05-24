@@ -182,6 +182,110 @@ app.get("/api/fx", async (req, res) => {
   }
 });
 
+app.get("/api/financials", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+    if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+
+    const modules = [
+      "summaryDetail",
+      "defaultKeyStatistics",
+      "financialData",
+      "incomeStatementHistory",
+      "balanceSheetHistory",
+      "cashflowStatementHistory",
+      "earningsTrend",
+    ].join(",");
+
+    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
+    const data = await yahooGet(url);
+    const result = data?.quoteSummary?.result?.[0];
+
+    if (!result) throw new Error(`No financial data for ${symbol}`);
+
+    const sd  = result.summaryDetail || {};
+    const ks  = result.defaultKeyStatistics || {};
+    const fd  = result.financialData || {};
+    const ish = result.incomeStatementHistory?.incomeStatementHistory?.[0] || {};
+    const bsh = result.balanceSheetHistory?.balanceSheetHistory?.[0] || {};
+    const csh = result.cashflowStatementHistory?.cashflowStatements?.[0] || {};
+    const et  = result.earningsTrend?.trend || [];
+
+    function val(obj) {
+      if (obj == null) return null;
+      if (typeof obj === "object" && "raw" in obj) return obj.raw;
+      return obj;
+    }
+
+    const revenue     = val(ish.totalRevenue);
+    const netIncome   = val(ish.netIncome);
+    const grossProfit = val(ish.grossProfit);
+    const ebitda      = val(ish.ebitda) ?? val(fd.ebitda);
+    const totalAssets = val(bsh.totalAssets);
+    const totalDebt   = val(bsh.totalLiab);
+    const equity      = val(bsh.totalStockholderEquity);
+    const cash        = val(bsh.cash) ?? val(fd.totalCash);
+    const freeCashFlow = val(csh.freeCashflow) ?? val(fd.freeCashflow);
+    const operatingCF  = val(csh.totalCashFromOperatingActivities);
+
+    const currentPrice  = val(fd.currentPrice);
+    const targetMean    = val(fd.targetMeanPrice);
+    const targetLow     = val(fd.targetLowPrice);
+    const targetHigh    = val(fd.targetHighPrice);
+    const recommendationKey = fd.recommendationKey || null;
+    const numberOfAnalysts  = val(fd.numberOfAnalystOpinions);
+
+    const fwdPE       = val(sd.forwardPE);
+    const trailPE     = val(sd.trailingPE);
+    const pbRatio     = val(ks.priceToBook);
+    const psRatio     = val(ks.priceToSalesTrailing12Months) ?? val(sd.priceToSalesTrailing12Months);
+    const evEbitda    = val(ks.enterpriseToEbitda);
+    const evRevenue   = val(ks.enterpriseToRevenue);
+    const beta        = val(sd.beta);
+    const divYield    = val(sd.dividendYield);
+    const payoutRatio = val(sd.payoutRatio);
+
+    const revenueGrowth  = val(fd.revenueGrowth);
+    const earningsGrowth = val(fd.earningsGrowth);
+    const profitMargin   = val(fd.profitMargins);
+    const grossMargin    = val(fd.grossMargins);
+    const operatingMargin = val(fd.operatingMargins);
+    const roe            = val(fd.returnOnEquity);
+    const roa            = val(fd.returnOnAssets);
+    const debtToEquity   = val(fd.debtToEquity);
+    const currentRatio   = val(fd.currentRatio);
+    const quickRatio     = val(fd.quickRatio);
+
+    // Next year EPS estimate from trend
+    const nextYearTrend = et.find(t => t.period === "+1y");
+    const epsNextYear   = val(nextYearTrend?.earningsEstimate?.avg);
+    const revenueNextYear = val(nextYearTrend?.revenueEstimate?.avg);
+
+    const shortRatio = val(ks.shortRatio);
+    const floatShares = val(ks.floatShares);
+    const sharesOutstanding = val(ks.sharesOutstanding);
+    const insiderPercent = val(ks.heldPercentInsiders);
+    const institutionPercent = val(ks.heldPercentInstitutions);
+
+    res.json({
+      symbol,
+      pricing: { currentPrice, targetMean, targetLow, targetHigh, recommendationKey, numberOfAnalysts },
+      valuation: { fwdPE, trailPE, pbRatio, psRatio, evEbitda, evRevenue },
+      income: { revenue, netIncome, grossProfit, ebitda, profitMargin, grossMargin, operatingMargin },
+      growth: { revenueGrowth, earningsGrowth, epsNextYear, revenueNextYear },
+      cashflow: { freeCashFlow, operatingCF },
+      balanceSheet: { totalAssets, totalDebt, equity, cash, debtToEquity, currentRatio, quickRatio },
+      returns: { roe, roa },
+      dividends: { divYield, payoutRatio },
+      risk: { beta, shortRatio },
+      ownership: { floatShares, sharesOutstanding, insiderPercent, institutionPercent },
+    });
+  } catch (err) {
+    console.error("GET /api/financials", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Session middleware
 app.use(
   session({
