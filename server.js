@@ -187,6 +187,111 @@ app.get("/api/financials", async (req, res) => {
     const symbol = normalizeSymbol(req.query.symbol);
     if (!symbol) return res.status(400).json({ error: "Missing symbol" });
 
+    // Use the v8 chart endpoint (same one that works for quotes) with extended range for more meta
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1y&includePrePost=false`;
+    const data = await yahooGet(url);
+    const meta = data?.chart?.result?.[0]?.meta;
+
+    if (!meta) throw new Error(`No data for ${symbol}`);
+
+    function n(v) { return v != null && isFinite(v) ? v : null; }
+
+    res.json({
+      symbol: meta.symbol || symbol,
+      pricing: {
+        currentPrice:       n(meta.regularMarketPrice),
+        targetMean:         n(meta.targetMeanPrice),
+        targetLow:          n(meta.targetLowPrice),
+        targetHigh:         n(meta.targetHighPrice),
+        recommendationKey:  meta.recommendationKey || null,
+        numberOfAnalysts:   n(meta.numberOfAnalystOpinions),
+      },
+      valuation: {
+        fwdPE:    n(meta.forwardPE),
+        trailPE:  n(meta.trailingPE),
+        pbRatio:  n(meta.priceToBook),
+        psRatio:  n(meta.priceToSalesTrailing12Months),
+        evEbitda: n(meta.enterpriseToEbitda),
+        evRevenue:n(meta.enterpriseToRevenue),
+      },
+      income: {
+        revenue:          n(meta.totalRevenue),
+        netIncome:        n(meta.netIncomeToCommon),
+        grossProfit:      null,
+        ebitda:           n(meta.ebitda),
+        profitMargin:     n(meta.profitMargins),
+        grossMargin:      n(meta.grossMargins),
+        operatingMargin:  n(meta.operatingMargins),
+      },
+      growth: {
+        revenueGrowth:  n(meta.revenueGrowth),
+        earningsGrowth: n(meta.earningsGrowth),
+        epsNextYear:    n(meta.epsForward),
+        revenueNextYear:null,
+      },
+      cashflow: {
+        freeCashFlow: n(meta.freeCashflow),
+        operatingCF:  n(meta.operatingCashflow),
+      },
+      balanceSheet: {
+        totalAssets:  null,
+        totalDebt:    n(meta.totalDebt),
+        equity:       null,
+        cash:         n(meta.totalCash),
+        debtToEquity: n(meta.debtToEquity),
+        currentRatio: n(meta.currentRatio),
+        quickRatio:   n(meta.quickRatio),
+      },
+      returns: {
+        roe: n(meta.returnOnEquity),
+        roa: n(meta.returnOnAssets),
+      },
+      dividends: {
+        divYield:    n(meta.dividendYield) ?? n(meta.trailingAnnualDividendYield),
+        payoutRatio: n(meta.payoutRatio),
+      },
+      risk: {
+        beta:        n(meta.beta),
+        shortRatio:  n(meta.shortRatio),
+      },
+      ownership: {
+        floatShares:         n(meta.floatShares),
+        sharesOutstanding:   n(meta.sharesOutstanding),
+        insiderPercent:      n(meta.heldPercentInsiders),
+        institutionPercent:  n(meta.heldPercentInstitutions),
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/financials", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.get("/api/fx", async (req, res) => {
+  try {
+    const url =
+      "https://query1.finance.yahoo.com/v8/finance/chart/CAD=X?interval=1d&range=1d";
+    const data = await yahooGet(url);
+    const meta = data?.chart?.result?.[0]?.meta;
+    const rate = meta?.regularMarketPrice;
+
+    if (!rate) {
+      return res.status(404).json({ error: "USD/CAD rate unavailable" });
+    }
+
+    res.json({ from: "USD", to: "CAD", rate });
+  } catch (err) {
+    console.error("GET /api/fx", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/financials", async (req, res) => {
+  try {
+    const symbol = normalizeSymbol(req.query.symbol);
+    if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+
     const modules = [
       "summaryDetail",
       "defaultKeyStatistics",
